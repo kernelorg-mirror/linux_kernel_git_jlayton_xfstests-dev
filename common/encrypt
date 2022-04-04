@@ -153,6 +153,10 @@ _scratch_mkfs_encrypted()
 		# erase the UBI volume; reformated automatically on next mount
 		$UBIUPDATEVOL_PROG ${SCRATCH_DEV} -t
 		;;
+	ceph)
+		# always enabled on ceph
+		_scratch_mkfs
+		;;
 	*)
 		_notrun "No encryption support for $FSTYP"
 		;;
