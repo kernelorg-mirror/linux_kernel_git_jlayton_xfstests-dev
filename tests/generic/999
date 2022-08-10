@@ -1,0 +1,34 @@
+#! /bin/bash
+# SPDX-License-Identifier: GPL-2.0
+# Copyright (c) 2023, Jeff Layton <jlayton@kernel.org>
+#
+# FS QA Test No. 999
+#
+# Multigrain time test
+#
+# Open a file, and do 1 byte writes to it, and statx the file for
+# the ctime and mtime after each write. Ensure that they have changed
+# since the previous write.
+#
+. ./common/preamble
+_begin_fstest auto quick
+
+_require_test_program mgtime
+_require_xfs_io_command "statx" "-r"
+
+testfile="$TEST_DIR/test_mgtime_file.$$"
+
+# Multigrain timestamps are opt-in per filesystem. Skip unless statx
+# reports STATX_ATTR_MULTIGRAIN_TIMESTAMP (0x00800000).
+touch $testfile
+attributes=$($XFS_IO_PROG -c 'statx -r' $testfile | awk '/stat.attributes / { print $3 }')
+if ! (( attributes & 0x00800000 )); then
+	rm -f $testfile
+	_notrun "multigrain timestamps not supported on $FSTYP"
+fi
+
+$here/src/mgtime $testfile
+
+# success, all done
+status=0
+exit
