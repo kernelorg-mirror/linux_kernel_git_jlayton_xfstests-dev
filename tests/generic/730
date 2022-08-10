@@ -1,0 +1,25 @@
+#! /bin/bash
+# SPDX-License-Identifier: GPL-2.0
+# Copyright (c) 2023, Jeff Layton <jlayton@redhat.com>
+#
+# FS QA Test No. 730
+#
+# Multigrain time test
+#
+# Open a file, and do 1 byte writes to it, and statx the file for
+# the ctime and mtime after each write. Ensure that they have changed
+# since the previous write.
+#
+. ./common/preamble
+_begin_fstest auto quick
+
+# Override the default cleanup function.
+_require_test_program mgctime
+
+testfile="$TEST_DIR/test_mgtime_file.$$"
+
+$here/src/mgctime $testfile
+
+# success, all done
+status=0
+exit
