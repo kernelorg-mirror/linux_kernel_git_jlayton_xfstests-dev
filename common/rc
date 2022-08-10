@@ -4925,6 +4925,23 @@ hexdump()
 	_fail "Use _hexdump(), please!"
 }
 
+_require_iversion ()
+{
+
+	_mask=$($XFS_IO_PROG -f -c "statx -m 0x4000 -r" $TEST_DIR/version_test.$$ \
+		| grep "^stat.mask" | cut -d' ' -f 3)
+	rm -f $TEST_DIR/version_test.$$
+	if [ $(( ${_mask}&0x4000 )) -eq 0 ]; then
+		_notrun "$FSTYP does not support inode change counter"
+	fi
+}
+
+_get_iversion ()
+{
+	$XFS_IO_PROG -r -c "statx -m 0x4000 -r" $1 | grep '^stat.version' | \
+		cut -d' ' -f3
+}
+
 init_rc
 
 ################################################################################

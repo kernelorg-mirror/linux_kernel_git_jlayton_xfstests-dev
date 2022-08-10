@@ -1,0 +1,146 @@
+#! /bin/bash
+# SPDX-License-Identifier: GPL-2.0
+# Copyright (c) 2021, Jeff Layton <jlayton@redhat.com>
+#
+# FS QA Test No. 999
+#
+# Test the behavior of STATX_INO_VERSION
+#
+. ./common/preamble
+_begin_fstest auto quick rw
+
+# Import common functions.
+. ./common/filter
+
+# real QA test starts here
+_supported_fs generic
+_require_test
+_require_iversion
+
+# from the stat.h header file
+UTIME_OMIT=1073741822
+
+testdir="$TEST_DIR/test_iversion_dir.$$"
+testfile="$testdir/test_iversion_file.$$"
+
+mkdir $testdir
+
+# DIRECTORY TESTS
+#################
+# Does dir change attr change on a create?
+old=$(_get_iversion $testdir)
+touch $testfile
+new=$(_get_iversion $testdir)
+if [ $old = $new ]; then
+	_fail "Change attr of dir did not change after create!"
+fi
+
+# on a hardlink?
+old=$new
+ln $testfile $testdir/linky
+new=$(_get_iversion $testdir)
+if [ $old = $new ]; then
+	_fail "Change attr of dir did not change after hardlink!"
+fi
+
+# on an unlink?
+old=$new
+rm -f $testfile
+new=$(_get_iversion $testdir)
+if [ $old = $new ]; then
+	_fail "Change attr of dir did not change after unlink!"
+fi
+
+# on a rename (within same dir)
+old=$new
+mv $testdir/linky $testfile
+new=$(_get_iversion $testdir)
+if [ $old = $new ]; then
+	_fail "Change attr of dir did not change after rename!"
+fi
+
+# on a mknod
+old=$new
+mknod $testdir/pipe p
+new=$(_get_iversion $testdir)
+if [ $old = $new ]; then
+	_fail "Change attr of dir did not change after mknod!"
+fi
+
+
+# REGULAR FILE TESTS
+####################
+# ensure version changes after a write
+old=$(_get_iversion $testfile)
+$XFS_IO_PROG -c "pwrite -W -q 0 32" $testfile
+new=$(_get_iversion $testfile)
+if [ $old = $new ]; then
+	_fail "Change attr did not change after write!"
+fi
+
+# ensure it doesn't change after a sync
+old=$new
+sync
+new=$(_get_iversion $testfile)
+if [ $old != $new ]; then
+	_fail "Change attr changed after sync!"
+fi
+
+# ensure version does not change after read
+old=$new
+cat $testfile > /dev/null
+new=$(_get_iversion $testfile)
+if [ $old != $new ]; then
+	_fail "Change attr changed after read!"
+fi
+
+# ensure it changes after truncate
+old=$new
+truncate --size 0 $testfile
+new=$(_get_iversion $testfile)
+if [ $old = $new ]; then
+	_fail "Change attr did not change after truncate!"
+fi
+
+# ensure it changes after only atime update
+old=$new
+$XFS_IO_PROG -c "utimes 1 1 $UTIME_OMIT $UTIME_OMIT" $testfile
+new=$(_get_iversion $testfile)
+if [ $old = $new ]; then
+	_fail "Change attr did not change after atime update!"
+fi
+
+# ensure it changes after utimes atime/mtime update
+old=$new
+$XFS_IO_PROG -c "utimes 1 1 1 1" $testfile
+new=$(_get_iversion $testfile)
+if [ $old = $new ]; then
+	_fail "Change attr did not change after mtime update!"
+fi
+
+# after setting xattr
+old=$new
+setfattr -n user.foo -v bar $testfile
+new=$(_get_iversion $testfile)
+if [ $old = $new ]; then
+	_fail "Change attr did not change after setxattr!"
+fi
+
+# after removing xattr
+old=$new
+setfattr -x user.foo $testfile
+new=$(_get_iversion $testfile)
+if [ $old = $new ]; then
+	_fail "Change attr did not change after rmxattr!"
+fi
+
+# after setting POSIX acl
+old=$new
+setfacl -m g:nobody:r $testfile
+new=$(_get_iversion $testfile)
+if [ $old = $new ]; then
+      _fail "Change attr did not change after setting ACL!"
+fi
+
+status=0
+exit
