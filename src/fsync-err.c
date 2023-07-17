@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0
 /*
  * fsync-err.c: test whether writeback errors are reported to all open fds
  * 		and properly cleared as expected after being seen once on each
