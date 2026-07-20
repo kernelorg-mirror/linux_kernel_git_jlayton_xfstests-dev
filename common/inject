@@ -111,3 +111,53 @@ _scratch_inject_error()
 		_fail "Cannot inject error ${type} value ${value}."
 	fi
 }
+
+# Requires the kernel fail_function facility (CONFIG_FUNCTION_ERROR_INJECTION
+# and CONFIG_FAIL_FUNCTION) and, if a function name is given, that the function
+# is annotated with ALLOW_ERROR_INJECTION().
+_require_function_error_injection()
+{
+	local func="$1"
+
+	test -d "$DEBUGFS_MNT/fail_function" || \
+		_notrun "$DEBUGFS_MNT/fail_function not found; CONFIG_FAIL_FUNCTION not enabled"
+
+	if [ -n "$func" ]; then
+		grep -qw "$func" "$DEBUGFS_MNT/error_injection/list" 2>/dev/null || \
+			_notrun "$func is not registered for error injection"
+	fi
+}
+
+# Inject a fixed return value into a kernel function via fail_function.
+#   $1 - function name (must be ALLOW_ERROR_INJECTION annotated)
+#   $2 - return value to inject (e.g. -12 for -ENOMEM)
+#   $3 - number of times to fail (default 1)
+_inject_function_error()
+{
+	local func="$1"
+	local retval="$2"
+	local times="${3:-1}"
+
+	# Writing the function name to "inject" creates its per-function dir.
+	echo "$func" > "$DEBUGFS_MNT/fail_function/inject"
+	# The retval file is an unsigned hex attribute (DEFINE_DEBUGFS_ATTRIBUTE
+	# "%llx"), so a negative errno like -12 must be written as its unsigned
+	# 64-bit (two's-complement) hex form; a bare "-12" is rejected with EINVAL.
+	printf '%#x\n' "$retval" > "$DEBUGFS_MNT/fail_function/$func/retval"
+	echo 100 > "$DEBUGFS_MNT/fail_function/probability"
+	echo 0 > "$DEBUGFS_MNT/fail_function/interval"
+	echo 0 > "$DEBUGFS_MNT/fail_function/space"
+	echo 0 > "$DEBUGFS_MNT/fail_function/verbose"
+	echo "$times" > "$DEBUGFS_MNT/fail_function/times"
+}
+
+# Stop injecting errors into a kernel function set up by
+# _inject_function_error().
+_uninject_function_error()
+{
+	local func="$1"
+
+	echo 0 > "$DEBUGFS_MNT/fail_function/times" 2>/dev/null
+	echo 0 > "$DEBUGFS_MNT/fail_function/probability" 2>/dev/null
+	echo "!$func" > "$DEBUGFS_MNT/fail_function/inject" 2>/dev/null
+}

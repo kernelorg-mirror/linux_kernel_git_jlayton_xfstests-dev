@@ -1,0 +1,83 @@
+#! /bin/bash
+# SPDX-License-Identifier: GPL-2.0
+# Copyright (c) 2026 Jeff Layton.  All Rights Reserved.
+#
+# FS QA Test No. 354
+#
+# Verify that an -ENOMEM in the synchronous directory entry insertion path is
+# returned to userspace without aborting the filesystem.
+#
+# btrfs pre-allocates the delayed dir index before modifying the btree, so a
+# failure in btrfs_prealloc_delayed_dir_index() must surface as -ENOMEM from
+# mkdir()/create()/etc. rather than a transaction abort. Use the fail_function
+# facility to force that allocation to fail and confirm the fs survives.
+#
+. ./common/preamble
+_begin_fstest auto quick
+
+. ./common/inject
+. ./common/filter
+
+_require_scratch
+# For the automatic fsck at unmount, which confirms the orphaned inode left by
+# the failed operation is cleaned up and the fs is consistent.
+_require_check_dmesg
+_require_function_error_injection btrfs_prealloc_delayed_dir_index
+
+func=btrfs_prealloc_delayed_dir_index
+
+_scratch_mkfs >> $seqres.full 2>&1
+_scratch_mount
+
+# Pre-create the stderr file. fail_function has no usable task filter, so the
+# injection is global, and $tmp may well live on a btrfs filesystem itself. If
+# the shell had to create this file it would insert a dir entry and swallow the
+# injected failure before mkdir() ever ran.
+touch $tmp.err
+
+# For the same reason any other btrfs dir-entry creation on the system can
+# consume the one-shot failure, so retry until our mkdir is the operation that
+# takes it.
+err=""
+for i in $(seq 1 20); do
+	rm -rf "$SCRATCH_MNT/dir"
+
+	# Force a single -ENOMEM (-12) into the prealloc path.
+	_inject_function_error $func -12 1
+	mkdir "$SCRATCH_MNT/dir" 2>$tmp.err
+	res=$?
+	_uninject_function_error $func
+
+	# mkdir succeeded, so something else consumed the injected failure.
+	# Note we must not leave the directory behind, or the next attempt
+	# would fail with EEXIST rather than the injected error.
+	if [ $res -eq 0 ]; then
+		continue
+	fi
+
+	err=$(cat $tmp.err)
+	break
+done
+
+if [ -z "$err" ]; then
+	_notrun "injected error did not reach mkdir"
+fi
+
+# The error returned to userspace must be ENOMEM, not EROFS (which would mean
+# the transaction was aborted and the fs went read-only).
+echo "$err" | grep -qi "cannot allocate memory" || \
+	{ echo "unexpected error from mkdir:"; echo "$err" | _filter_scratch; }
+
+# The filesystem must still be usable: a create with injection disabled must
+# succeed. On an aborted (read-only) fs this would fail with EROFS.
+mkdir "$SCRATCH_MNT/dir2" || _fail "filesystem unusable after injected ENOMEM"
+
+# Cycle the mount to run orphan cleanup for the inode left behind by the failed
+# mkdir, then keep using the fs to be sure it is healthy.
+_scratch_cycle_mount
+touch "$SCRATCH_MNT/dir2/file"
+
+echo "silence is golden"
+
+status=0
+exit
